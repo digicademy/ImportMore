@@ -6,6 +6,7 @@
  */
 package org.adwmainz.da.extensions.importmore.utils;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,8 @@ import net.sf.saxon.s9api.XdmNode;
 public class ImportMoreAnnotationParser {
 	
 	// relevant regex pattern
-	protected static final String IMPORT_MORE_ANNOTATION_PATTERN = "\\$\\$IMPORT" + "\\(" + "(.*?)" /* XPath */ + "\\)" + "\\$\\$";
+	protected static final String IMPORT_MORE_ANNOTATION_PATTERN = "\\$\\$IMPORT" + "\\(" + "(.*?)" /* XPath */ + "\\)" + "(!.*)?" /* Flags */ + "\\$\\$";
+	protected static final String FLAG_SEPARATOR = "!";
 	
 	/**
 	 * Replaces all ImportMoreAnnotations in a given String with XPath results from the given context node
@@ -30,12 +32,30 @@ public class ImportMoreAnnotationParser {
 	 */
 	public static String replaceAnnotations(String annotatedText, XdmNode contextNode, Map<String, String> namespaceMap)
 			throws ImportMoreXMLException, ImportMoreXPathException {
-		for (String importMoreAnnotation: new HashSet<>(findAnnotations(annotatedText))) {
+		for (String importMoreAnnotation: new HashSet<>(ImportMoreAnnotationParser.findAnnotations(annotatedText))) {
 			String xPathExpression = RegexUtils.getFirstMatch(importMoreAnnotation, IMPORT_MORE_ANNOTATION_PATTERN, 1);
-			String importedFragment = SaxonUtils.getFirstXPathResult(contextNode, xPathExpression, namespaceMap).getStringValue();
+			List<String> flags = getFlags(importMoreAnnotation);
+			
+			String importedFragment = "";
+			if (flags.contains("XML"))
+				// concat all result items
+				importedFragment = String.join("", SaxonUtils.getSerializedXPathResults(contextNode, xPathExpression, namespaceMap));
+			else
+				// get only the text value of the first result item
+				importedFragment = SaxonUtils.getFirstXPathResult(contextNode, xPathExpression, namespaceMap).getStringValue();			
 			annotatedText = annotatedText.replace(importMoreAnnotation, importedFragment);
 		}
 		return annotatedText;
+	}
+	
+	protected static List<String> getFlags(String importMoreAnnotation) {
+		List<String> flags = new ArrayList<>();
+		String serializedFlags = RegexUtils.getFirstMatch(importMoreAnnotation, IMPORT_MORE_ANNOTATION_PATTERN, 2);
+		if (serializedFlags != null) {
+			for (String flag: serializedFlags.split(FLAG_SEPARATOR))
+				flags.add(flag);
+		}
+		return flags;
 	}
 	
 	/**
@@ -51,6 +71,8 @@ public class ImportMoreAnnotationParser {
 	 */
 	public static String getDescription() {
 		return "You may import one or more parts of this argument by using the annotation $$IMPORT( xpath )$$ where xpath denotes an XPath expression relative to"
-				+ " the result(s) of the param '" + ImportMoreArgumentProvider.ARGUMENT_REQUESTED_ELEMENT_LOCATION + "'.";
+				+ " the result(s) of the param '" + ImportMoreArgumentProvider.ARGUMENT_REQUESTED_ELEMENT_LOCATION + "'.\n"
+				+ "Please note that this will only return the String value of the first XPath result! However, you can also use $$IMPORT( xpath )!XML$$ to get a"
+				+ " fragment consisting of all results and their respective markup instead.";
 	}
 }
